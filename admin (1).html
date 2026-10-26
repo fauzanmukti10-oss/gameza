@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>GAMEZA Admin</title>
+<style>
+:root{--bg:#070d24;--card:#101a3d;--line:#24366b;--text:#eaf1ff;--muted:#8fa2d0;--cyan:#22c8ff;--yellow:#ffc928;--ok:#38d996;--bad:#ff6b6b}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:560px;padding:14px;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,sans-serif}
+h1{font-size:22px;margin:0 0 12px}h1 span{color:var(--cyan)}
+input,select,button{font:inherit;color:var(--text);background:#0a1230;border:1px solid var(--line);border-radius:10px;padding:11px 12px;width:100%}
+button{background:var(--cyan);color:#04122b;font-weight:700;border:0;cursor:pointer}
+button.alt{background:transparent;color:var(--text);border:1px solid var(--line)}
+button:disabled{opacity:.5}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin:10px 0}
+.card select{margin:8px 0}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.k{font-weight:800;color:var(--yellow)}.m{color:var(--muted);font-size:13px}
+.msg{min-height:22px;font-size:14px;margin:8px 0}.err{color:var(--bad)}.ok{color:var(--ok)}
+.hide{display:none}
+.row select,.row input{margin:0}
+</style></head>
+<body>
+<h1>GAME<span>ZA</span> Admin</h1>
+<div id="login">
+  <input id="em" type="email" placeholder="Email admin" autocomplete="username">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password" style="margin-top:8px">
+  <button id="masuk" type="button" style="margin-top:8px">Masuk</button>
+</div>
+<p id="msg" class="msg" aria-live="polite"></p>
+<div id="app" class="hide">
+  <div class="row" style="margin-bottom:10px"><button id="tP" type="button">Pesanan</button><button id="tH" type="button" class="alt">Harga</button></div>
+  <div id="vH" class="hide"><select id="fg" aria-label="Pilih game"></select><div id="lh"></div></div>
+  <div id="vP">
+  <div class="row"><select id="fs" aria-label="Filter status"></select><button id="rf" type="button" class="alt">Muat ulang</button></div>
+  <div id="list"></div>
+  </div>
+  <div class="card"><div class="k">Ganti password</div>
+    <input id="np" type="password" placeholder="Password baru (minimal 10 karakter)" autocomplete="new-password" style="margin:8px 0">
+    <button id="gp" type="button">Simpan password</button></div>
+  <button id="keluar" type="button" class="alt">Keluar</button>
+</div>
+<script>
+const BASE = "https://ubrwpocpbtxhttzzqidv.supabase.co";
+const KEY = "sb_publishable_0IStdDT2A5ueyzI7PGTfUQ_pRGoI5Yk";
+const ST = ["pending", "dibayar", "diproses", "selesai", "batal"];
+const $ = id => document.getElementById(id);
+const rp = n => "Rp" + Number(n).toLocaleString("id-ID");
+const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
+let tok = sessionStorage.getItem("gz_adm") || "";
+
+function say(t, c){ const m = $("msg"); m.textContent = t || ""; m.className = "msg " + (c || ""); }
+function ramah(m){
+  if (/not confirmed/i.test(m)) return "Email belum dikonfirmasi.";
+  if (/invalid login/i.test(m)) return "Email atau password salah.";
+  if (/bukan admin/i.test(m)) return "Akun ini bukan admin.";
+  if (/jwt|expired/i.test(m)) return "Sesi habis. Masuk lagi.";
+  return m;
+}
+async function api(path, opt){
+  const h = { apikey: KEY, "Content-Type": "application/json" };
+  if (tok) h.Authorization = "Bearer " + tok;
+  const r = await fetch(BASE + path, Object.assign({}, opt, { headers: h }));
+  let j = null; try{ j = await r.json(); }catch(e){}
+  if (!r.ok) throw new Error((j && (j.msg || j.message || j.error_description || j.error)) || ("Gagal (" + r.status + ")"));
+  return j;
+}
+const rpc = (n, b) => api("/rest/v1/rpc/" + n, { method: "POST", body: JSON.stringify(b || {}) });
+
+async function muat(){
+  const rows = await rpc("admin_daftar_pesanan", { p_status: $("fs").value || null, p_limit: 50 });
+  const box = $("list"); box.textContent = "";
+  if (!rows.length){ box.append(el("p", "m", "Belum ada pesanan.")); return; }
+  rows.forEach(o => {
+    const c = el("div", "card");
+    const id = o.player_id + (o.server_id ? " " + o.server_id : "");
+    const sel = el("select");
+    ST.forEach(s => { const op = el("option", "", s); op.value = s; if (s === o.order_status) op.selected = true; sel.append(op); });
+    const sv = el("button", "", "Simpan status");
+    sv.type = "button";
+    sv.onclick = async () => {
+      sv.disabled = true;
+      try{ await rpc("admin_ubah_status", { p_kode: o.order_code, p_status: sel.value }); say(o.order_code + " jadi " + sel.value, "ok"); }
+      catch(e){ say(ramah(e.message), "err"); }
+      sv.disabled = false;
+    };
+    const cp = el("button", "alt", "Salin ID");
+    cp.type = "button";
+    cp.onclick = () => { if (navigator.clipboard) navigator.clipboard.writeText(id).then(() => say("ID disalin: " + id, "ok")); };
+    const row = el("div", "row"); row.append(sv, cp);
+    c.append(el("div", "k", o.order_code),
+      el("div", "", o.game_name + " - " + o.product_name + " - " + rp(o.price)),
+      el("div", "m", "ID: " + id + " | " + new Date(o.created_at).toLocaleString("id-ID")),
+      sel, row);
+    box.append(c);
+  });
+}
+async function buka(){
+  try{ await muat(); $("login").classList.add("hide"); $("app").classList.remove("hide"); say(""); }
+  catch(e){ tok = ""; sessionStorage.removeItem("gz_adm"); say(ramah(e.message), "err"); }
+}
+$("masuk").onclick = async () => {
+  tok = ""; say("Masuk...");
+  try{
+    const j = await api("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email: $("em").value.trim(), password: $("pw").value }) });
+    tok = j.access_token; sessionStorage.setItem("gz_adm", tok); $("pw").value = "";
+    await buka();
+  }catch(e){ say(ramah(e.message), "err"); }
+};
+$("gp").onclick = async () => {
+  const p = $("np").value;
+  if (p.length < 10) return say("Password baru minimal 10 karakter.", "err");
+  try{ await api("/auth/v1/user", { method: "PUT", body: JSON.stringify({ password: p }) }); $("np").value = ""; say("Password sudah diganti.", "ok"); }
+  catch(e){ say(ramah(e.message), "err"); }
+};
+$("keluar").onclick = () => { tok = ""; sessionStorage.removeItem("gz_adm"); location.reload(); };
+$("rf").onclick = () => muat().then(() => say("")).catch(e => say(ramah(e.message), "err"));
+$("fs").onchange = $("rf").onclick;
+[["", "Semua status"]].concat(ST.map(s => [s, s])).forEach(([v, t]) => { const o = el("option", "", t); o.value = v; $("fs").append(o); });
+let HG = [];
+async function muatHarga(){
+  HG = await rpc("admin_daftar_harga");
+  const fg = $("fg"), cur = fg.value;
+  fg.textContent = "";
+  Array.from(new Set(HG.map(x => x.game_name))).forEach(g => { const o = el("option", "", g); o.value = g; fg.append(o); });
+  if (cur) fg.value = cur;
+  tampilHarga();
+}
+function tampilHarga(){
+  const box = $("lh"); box.textContent = "";
+  HG.filter(x => x.game_name === $("fg").value).forEach(x => {
+    const c = el("div", "card");
+    const inp = el("input"); inp.type = "number"; inp.inputMode = "numeric"; inp.value = x.price;
+    const st = el("select");
+    [["true", "Aktif"], ["false", "Habis"]].forEach(([v, t]) => { const o = el("option", "", t); o.value = v; st.append(o); });
+    st.value = String(x.aktif);
+    const sv = el("button", "", "Simpan"); sv.type = "button";
+    sv.onclick = async () => {
+      sv.disabled = true;
+      const hg = parseInt(inp.value, 10), ak = st.value === "true";
+      try{
+        await rpc("admin_ubah_harga", { p_game: x.game_name, p_produk: x.product_name, p_harga: hg, p_aktif: ak });
+        x.price = hg; x.aktif = ak;
+        say(x.product_name + " disimpan: " + rp(hg) + (ak ? "" : " (habis)"), "ok");
+      }catch(e){ say(ramah(e.message), "err"); }
+      sv.disabled = false;
+    };
+    const row = el("div", "row"); row.append(inp, st, sv);
+    c.append(el("div", "k", x.product_name), row);
+    box.append(c);
+  });
+}
+$("fg").onchange = tampilHarga;
+function tab(hrg){
+  $("vP").classList.toggle("hide", hrg); $("vH").classList.toggle("hide", !hrg);
+  $("tP").className = hrg ? "alt" : ""; $("tH").className = hrg ? "" : "alt";
+  if (hrg) muatHarga().catch(e => say(ramah(e.message), "err"));
+}
+$("tP").onclick = () => tab(false);
+$("tH").onclick = () => tab(true);
+if (tok) buka();
+</script>
+</body></html>
